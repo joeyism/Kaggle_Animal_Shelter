@@ -1,5 +1,6 @@
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import ExtraTreesClassifier
 from sklearn import cross_validation
 
 import numpy as np
@@ -15,10 +16,11 @@ genderMapping = {"Male": 0, "Female": 1, "Unknown": 2}
 reproductiveMapping = {"Intact": 0, "Neutered": 1, "Spayed": 2, "Unknown":3}
 timeMapping = { "day": 1, "days":1, "week": 7, "weeks":7, "month": 30, "months":30, "year": 365, "years": 365 }
 outcomeSubtypeMapping = {'Suffering':1, 'Foster':2, 'Partner':3, 'Offsite':4, 'SCRP':5, 'Aggressive':6, 'Behavior':7, 'Rabies Risk':8, 'Medical':9, 'In Kennel':10, 'In Foster':11, 'Barn':12, 'Court/Investigation':13, 'Enroute':14, 'At Vet':15, 'In Surgery':16  }
+breedMapping = {"Chihuahua": 1, "Beagle": 2, "Labrador": 3, "Domestic Shorthair": 4, "Pit Bull": 5, "Dachshund": 6, "Border Collie":7, "Shepherd":8 , "Terrier":9, "Retriever": 10, "Dane": 11, "Sheepdog": 12, "Hound": 13, "Domestic Longhair":14, "Domestic Medium Hair":15, "Boxer":16}
 
 # Predictors
-methods = ["Random Forest", "Gradient Boosting"]
-randomForestPredictors = ["AnimalType", "Gender", "Reproductive", "Age", "Mix"]
+methods = ["Random Forest", "Gradient Boosting", "Extra Trees Classifier"]
+randomForestPredictors = ["AnimalType", "Gender", "Reproductive", "Age", "Mix", "HasName", "IsDay"]
 
 def get_gender(title):
     genderArr = title.split()
@@ -45,6 +47,19 @@ def get_mix(title):
     mixOrNot = breedArr[len(breedArr)-1]
     return 1 if mixOrNot == "Mix" else  0
 
+def get_mix_colours(title): # mix colours: 0 false, 1 true
+    return 1 if title.find("/") > -1 else 0
+
+def has_name(title): # 0 if no name, 1 if has name
+    return 0 if pandas.isnull(title) else 1
+
+def is_day(title): # 1 if it happens between 8am - 10 pm, 0 otherwise
+    dayBegins=8
+    dayEnds=22
+    time= title.split()[1]
+    hour = int(time.split(":")[0])
+    return 1 if hour < dayEnds and hour > dayBegins else 0
+
 def map_data(data):
     for k,v in animalTypeMapping.items():
         data.loc[data["AnimalType"] == k, "AnimalType"] = v
@@ -55,6 +70,12 @@ def map_data(data):
     data["Age"] = data["Age"].apply(get_age)
     data.loc[data["Age"] == 0, "Age"] = data["Age"].median()
     data["Mix"] = data["Breed"].apply(get_mix)
+    data["MixedColours"] = data["Color"].apply(get_mix_colours)
+    data["HasName"] = data["Name"].apply(has_name)
+    data["IsDay"] = data["DateTime"].apply(is_day)
+    for k,v in breedMapping.items():
+        data.loc[data["Breed"].str.contains(k), "BreedType"] = v
+    data["BreedType"] = data["BreedType"].fillna(0)
     return data
 
 def expandOutcome(data):
@@ -90,27 +111,37 @@ def normalize(data):
 def submission(idFrame, data, name):
     result = pandas.concat([idFrame, data], axis=1)
     print("Writing to " + name + ".csv")
-    result.to_csv(name+".csv", index=False);
+    result.to_csv(name+".csv", index=False)
 
 # Mapping
+print("Mapping data")
 animals = map_data(animals)
+animals.to_csv("modified_animals.csv", index=False)
+print("Mapping outcome")
 animals = map_outcome(animals)
 outcome = expandOutcome(animals)
+print("Mapping test data")
 animals_test = map_data(animals_test)
 
 # Ensemble
+print("Calculating Stacked Methods")
 algorithms = [
         [
-            RandomForestClassifier(random_state=1, n_estimators=150, min_samples_split=5, min_samples_leaf=1),
+            RandomForestClassifier(random_state=1, n_estimators=500, min_samples_split=5, min_samples_leaf=1),
             randomForestPredictors
             ],
         [
-            GradientBoostingClassifier(random_state=1, n_estimators=25, max_depth=3),
+            GradientBoostingClassifier(random_state=1, n_estimators=200, max_depth=3),
+            randomForestPredictors
+            ],
+        [
+            ExtraTreesClassifier(random_state=1, n_estimators=500, min_samples_split=5, min_samples_leaf=1),
             randomForestPredictors
             ]
         ]
 
 full_predictions = []
+overall_mean = []
 i = 0;
 for alg, predictors in algorithms:
     this_predictions = pandas.DataFrame(index=animals_test.index.values, columns=outcomeTypeMapping.keys())
@@ -126,17 +157,22 @@ for alg, predictors in algorithms:
     mean_score /= len(this_predictions.columns)
     print(methods[i] + "'s mean score is " + str(mean_score) + "\n")
     full_predictions.append(this_predictions)
+    overall_mean.append(mean_score)
     i = i+1
 
 idFrame = pandas.DataFrame({"ID":animals_test["ID"]})
 
-combined_predictions = (full_predictions[0] + full_predictions[1])/2
+
+combined_predictions = (full_predictions[0] + full_predictions[1] + full_predictions[2])/3
+avgMean = (overall_mean[0] + overall_mean[1] + overall_mean[2])/3
+print("Overall mean is "+str(avgMean) +"\n")
+
 for i, predictions in enumerate(full_predictions):
 #    full_predictions[i] = binarize(predictions)
     full_predictions[i] = normalize(predictions)
-    submission(idFrame, full_predictions[i], "full_predictions_"+str(i))
+    submission(idFrame, full_predictions[i], "full_predictions_"+methods[i])
 #combined_predictions = binarize(combined_predictions)
 combined_predictions = normalize(combined_predictions)
-submission(idFrame, combined_predictions, "combined_predictions") 
+submission(idFrame, combined_predictions, "combined_predictions_avg_"+str(avgMean)) 
 
 print("Done")
