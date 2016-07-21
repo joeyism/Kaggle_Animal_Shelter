@@ -57,16 +57,39 @@ def map_data(data):
     data["Mix"] = data["Breed"].apply(get_mix)
     return data
 
+def expandOutcome(data):
+    result = pandas.DataFrame(index=data["AnimalID"], columns=outcomeTypeMapping.keys())
+    result = result.fillna(0)
+    for k,v in outcomeTypeMapping.items():
+        Matches = (data["OutcomeType"] == v)[:]
+        result[k][Matches[Matches].index] = 1
+    return result
+
 def map_outcome(data):
     for k,v in outcomeTypeMapping.items():
         data.loc[data["OutcomeType"] == k, "OutcomeType"] = v
     return data
 
+def binarize(data):
+    result = data.copy()
+    result.loc[:,:]=0
+    for index, row in data.iterrows():
+        maxValue = np.amax(row)
+        maxIndex = row[row == maxValue].index[0]
+        result.set_value(index, maxIndex, 1)
+    return result 
+
+def submission(idFrame, data, name):
+    result = pandas.concat([idFrame, data], axis=1)
+    result.to_csv(name+".csv", index=False);
+
 # Mapping
 animals = map_data(animals)
 animals = map_outcome(animals)
+outcome = expandOutcome(animals)
 animals_test = map_data(animals_test)
 
+print(animals_test.index.values)
 # Ensemble
 algorithms = [
         [
@@ -78,19 +101,35 @@ algorithms = [
             randomForestPredictors
             ]
         ]
+
 full_predictions = []
 i = 0;
 for alg, predictors in algorithms:
-    scores = cross_validation.cross_val_score(alg, animals[predictors], animals["OutcomeType"].astype(float), cv=3)
-    print(methods[i] + " accuracy is " + str(scores.mean()))
-    alg.fit(animals[predictors], animals["OutcomeType"])
-    predictions = alg.predict_proba(animals_test[predictors].astype(float))[:,1]
-    full_predictions.append(predictions)
+    this_predictions = pandas.DataFrame(index=animals_test.index.values, columns=outcomeTypeMapping.keys())
+    print(this_predictions.index.values)
+    this_predictions = this_predictions.fillna(0)
+    mean_score = 0
+    for columns in this_predictions:
+        scores = cross_validation.cross_val_score(alg, animals[predictors], outcome[columns].astype(float), cv=3)
+        print(methods[i] + " for "+columns+"'s accuracy is " + str(scores.mean()))
+        mean_score +=scores.mean()
+        alg.fit(animals[predictors], outcome[columns])
+        predictions = alg.predict_proba(animals_test[predictors].astype(float))[:,1]
+        this_predictions[columns]=predictions
+    mean_score /= len(this_predictions.columns)
+    print(methods[i] + "'s mean score is " + str(mean_score) + "\n")
+    print(this_predictions.index.values)
+    full_predictions.append(this_predictions)
     i = i+1
-predictions = (full_predictions[0] + full_predictions[1])/2
-predictions[predictions <= .5] = 0
-predictions[predictions > .5] = 1
-predictions = predictions.astype(int)
+
+idFrame = pandas.DataFrame({"ID":animals_test["ID"]})
+print(idFrame.index.values)
+
+combined_predictions = (full_predictions[0] + full_predictions[1])/2
+for i, predictions in enumerate(full_predictions):
+    full_predictions[i] = binarize(predictions)
+    submission(idFrame, full_predictions[i], "full_predictions_"+str(i))
+combined_predictions = binarize(combined_predictions)
+submission(idFrame, combined_predictions, "combined_predictions") 
 
 # Submission
-
