@@ -79,8 +79,17 @@ def binarize(data):
         result.set_value(index, maxIndex, 1)
     return result 
 
+def normalize(data):
+    result = data.copy()
+    for index, row in data.iterrows():
+        sumValue = np.sum(row)
+        normalizedRow = row / sumValue
+        result.loc[index, :] = normalizedRow
+    return result 
+
 def submission(idFrame, data, name):
     result = pandas.concat([idFrame, data], axis=1)
+    print("Writing to " + name + ".csv")
     result.to_csv(name+".csv", index=False);
 
 # Mapping
@@ -89,7 +98,6 @@ animals = map_outcome(animals)
 outcome = expandOutcome(animals)
 animals_test = map_data(animals_test)
 
-print(animals_test.index.values)
 # Ensemble
 algorithms = [
         [
@@ -106,7 +114,6 @@ full_predictions = []
 i = 0;
 for alg, predictors in algorithms:
     this_predictions = pandas.DataFrame(index=animals_test.index.values, columns=outcomeTypeMapping.keys())
-    print(this_predictions.index.values)
     this_predictions = this_predictions.fillna(0)
     mean_score = 0
     for columns in this_predictions:
@@ -118,18 +125,18 @@ for alg, predictors in algorithms:
         this_predictions[columns]=predictions
     mean_score /= len(this_predictions.columns)
     print(methods[i] + "'s mean score is " + str(mean_score) + "\n")
-    print(this_predictions.index.values)
     full_predictions.append(this_predictions)
     i = i+1
 
 idFrame = pandas.DataFrame({"ID":animals_test["ID"]})
-print(idFrame.index.values)
 
 combined_predictions = (full_predictions[0] + full_predictions[1])/2
 for i, predictions in enumerate(full_predictions):
-    full_predictions[i] = binarize(predictions)
+#    full_predictions[i] = binarize(predictions)
+    full_predictions[i] = normalize(predictions)
     submission(idFrame, full_predictions[i], "full_predictions_"+str(i))
-combined_predictions = binarize(combined_predictions)
+#combined_predictions = binarize(combined_predictions)
+combined_predictions = normalize(combined_predictions)
 submission(idFrame, combined_predictions, "combined_predictions") 
 
-# Submission
+print("Done")
