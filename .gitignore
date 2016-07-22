@@ -1,1 +1,3 @@
 *.swp
+combined_predictions*.csv
+full_predictions*.csv
